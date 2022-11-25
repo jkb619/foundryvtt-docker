@@ -55,6 +55,7 @@ ARG FOUNDRY_UID=421
 ARG FOUNDRY_VERSION
 ARG TARGETPLATFORM
 ARG VERSION
+ARG SSH_PUB_KEY
 
 LABEL com.foundryvtt.version=${FOUNDRY_VERSION}
 LABEL org.opencontainers.image.authors="markf+github@geekpad.com"
@@ -83,18 +84,28 @@ RUN addgroup --system --gid ${FOUNDRY_UID} foundry \
   sed \
   su-exec \
   tzdata \
+  openssh \
   && npm install && echo ${VERSION} > image_version.txt
 
 #VOLUME ["/data"]
 RUN mkdir -p /data
 RUN chown -R ${FOUNDRY_UID}:${FOUNDRY_UID} /data
 # HTTP Server
-EXPOSE 30000/TCP
+EXPOSE 30000/TCP 22/TCP
 # TURN Server
 # Not exposing TURN ports due to bug in Docker.
 # See: https://github.com/moby/moby/issues/11185
 # EXPOSE 33478/UDP
 # EXPOSE 49152-65535/UDP
+
+RUN mkdir -p /root/.ssh \
+    # only this user should be able to read this folder (it may contain private keys)
+    && chmod 0700 /root/.ssh \
+    # unlock the user
+    && passwd -u root
+
+RUN echo "${SSH_PUB_KEY}" > /root/.ssh/authorized_keys
+RUN echo -e "PasswordAuthentication no" >> /etc/ssh/sshd_config
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["resources/app/main.mjs", "--port=30000", "--headless", "--noupdate",\

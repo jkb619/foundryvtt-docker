@@ -34,6 +34,10 @@ if [ "$(id -u)" = 0 ]; then
   log_debug "Timezone set to: ${TIMEZONE:-UTC}"
 fi
 
+log "Enable SSH"
+ssh-keygen -A
+/usr/sbin/sshd
+
 log "Starting felddy/foundryvtt container v${image_version}"
 log_debug "CONTAINER_VERBOSE set.  Debug logging enabled."
 
