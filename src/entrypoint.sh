@@ -22,10 +22,10 @@ source logging.sh
 
 image_version=$(cat image_version.txt)
 
-#if [ "$1" = "--version" ]; then
-#  echo "${image_version}"
-#  exit 0
-#fi
+if [ "$1" = "--version" ]; then
+  echo "${image_version}"
+  exit 0
+fi
 
 # Set the timezone before we start logging dates
 if [ "$(id -u)" = 0 ]; then
@@ -34,12 +34,10 @@ if [ "$(id -u)" = 0 ]; then
   log_debug "Timezone set to: ${TIMEZONE:-UTC}"
 fi
 
-log "Enable SSH"
-ssh-keygen -A
-/usr/sbin/sshd
-
 log "Starting felddy/foundryvtt container v${image_version}"
 log_debug "CONTAINER_VERBOSE set.  Debug logging enabled."
+log_debug "Running as: $(id)"
+log_debug "Environment: $(env | sort | sed -E 's/(.*PASSWORD|KEY.*)=.*/\1=[REDACTED]/g')"
 
 cookiejar_file="cookiejar.json"
 license_min_length=24
@@ -214,18 +212,10 @@ if [ $install_required = true ]; then
   ./patch_lang.js
 fi # install required
 
-#tula
-ls -alRt /data
-# ensure the permissions are set correctly
-log "Setting data directory permissions."
-FOUNDRY_UID="${FOUNDRY_UID:-foundry}"
-FOUNDRY_GID="${FOUNDRY_GID:-foundry}"
-
 if [ ! -f "${LICENSE_FILE}" ]; then
   log "Installation not yet licensed."
   log_debug "Ensuring ${CONFIG_DIR} directory exists."
   mkdir -p "${CONFIG_DIR}"
-  chown -R "${FOUNDRY_UID}:${FOUNDRY_GID}" /data/Config
   set +o nounset # length check will fail
   if [[ ${#FOUNDRY_LICENSE_KEY} -ge ${license_min_length} ]]; then
     set -o nounset
@@ -257,6 +247,11 @@ else
   log "Not modifying existing installation license key."
 fi
 
+# ensure the permissions are set correctly
+log "Setting data directory permissions."
+FOUNDRY_UID="${FOUNDRY_UID:-foundry}"
+FOUNDRY_GID="${FOUNDRY_GID:-foundry}"
+log_debug "Setting ownership of /data to ${FOUNDRY_UID}:${FOUNDRY_GID}."
 # skip files matching CONTAINER_PRESERVE_OWNER or already belonging to the right user and group
 find /data \
   -regex "${CONTAINER_PRESERVE_OWNER:-}" -prune -or \
@@ -273,11 +268,11 @@ fi
 # drop privileges and handoff to launcher
 log "Starting launcher with uid:gid as ${FOUNDRY_UID}:${FOUNDRY_GID}."
 export CONTAINER_PRESERVE_CONFIG FOUNDRY_ADMIN_KEY FOUNDRY_AWS_CONFIG \
-  FOUNDRY_DEMO_CONFIG FOUNDRY_HOSTNAME FOUNDRY_IP_DISCOVERY FOUNDRY_LANGUAGE \
-  FOUNDRY_LOCAL_HOSTNAME FOUNDRY_MINIFY_STATIC_FILES FOUNDRY_PASSWORD_SALT \
-  FOUNDRY_PROTOCOL FOUNDRY_PROXY_PORT FOUNDRY_PROXY_SSL FOUNDRY_ROUTE_PREFIX \
-  FOUNDRY_SSL_CERT FOUNDRY_SSL_KEY FOUNDRY_UPNP FOUNDRY_UPNP_LEASE_DURATION \
-  FOUNDRY_WORLD
+  FOUNDRY_COMPRESS_WEBSOCKET FOUNDRY_DEMO_CONFIG FOUNDRY_HOT_RELOAD FOUNDRY_HOSTNAME \
+  FOUNDRY_IP_DISCOVERY FOUNDRY_LANGUAGE FOUNDRY_LOCAL_HOSTNAME FOUNDRY_MINIFY_STATIC_FILES \
+  FOUNDRY_PASSWORD_SALT FOUNDRY_PROTOCOL FOUNDRY_PROXY_PORT FOUNDRY_PROXY_SSL \
+  FOUNDRY_ROUTE_PREFIX FOUNDRY_SSL_CERT FOUNDRY_SSL_KEY FOUNDRY_TELEMETRY FOUNDRY_UPNP \
+  FOUNDRY_UPNP_LEASE_DURATION FOUNDRY_WORLD
 su-exec "${FOUNDRY_UID}:${FOUNDRY_GID}" ./launcher.sh "$@" \
   || log_error "Launcher exited with error code: $?"
 
