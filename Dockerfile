@@ -1,7 +1,7 @@
 ARG FOUNDRY_PASSWORD
 ARG FOUNDRY_RELEASE_URL
 ARG FOUNDRY_USERNAME
-ARG FOUNDRY_VERSION=11.308
+ARG FOUNDRY_VERSION=11.313
 ARG NODE_IMAGE_VERSION=18-alpine3.18
 ARG VERSION
 
@@ -79,6 +79,7 @@ RUN addgroup --system --gid ${FOUNDRY_UID} foundry \
   && adduser --system --uid ${FOUNDRY_UID} --ingroup foundry foundry \
   && apk --update --no-cache add \
   curl \
+  file \
   jq \
   sed \
   su-exec \
