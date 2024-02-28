@@ -22,10 +22,10 @@ source logging.sh
 
 image_version=$(cat image_version.txt)
 
-#if [ "$1" = "--version" ]; then
-#  echo "${image_version}"
-#  exit 0
-#fi
+if [ "$1" = "--version" ]; then
+  echo "${image_version}"
+  exit 0
+fi
 
 # Set the timezone before we start logging dates
 if [ "$(id -u)" = 0 ]; then
@@ -34,12 +34,24 @@ if [ "$(id -u)" = 0 ]; then
   log_debug "Timezone set to: ${TIMEZONE:-UTC}"
 fi
 
-log "Enable SSH"
-ssh-keygen -A
-/usr/sbin/sshd
+# Setup the SIGTERM handler
+# shellcheck disable=SC2317
+# SC2317 - shellcheck does not understand reachability via traps
+handle_sigterm() {
+  log_warn "TERM signal received.  Shutting down server."
+  # Only attempt to terminate if the child process is still running
+  if kill -0 "$child_pid" 2> /dev/null; then
+    log_debug "Sending TERM signal to child pid: ${child_pid}"
+    kill -TERM "$child_pid" 2> /dev/null
+  else
+    log_warn "Child pid: ${child_pid} exited before we could sent TERM signal."
+  fi
+}
 
 log "Starting felddy/foundryvtt container v${image_version}"
 log_debug "CONTAINER_VERBOSE set.  Debug logging enabled."
+log_debug "Running as: $(id)"
+log_debug "Environment:\n$(env | sort | sed -E 's/(.*PASSWORD|KEY.*)=.*/\1=[REDACTED]/g')"
 
 cookiejar_file="cookiejar.json"
 license_min_length=24
@@ -159,9 +171,32 @@ if [ $install_required = true ]; then
 
   if [ -f "${release_filename}" ]; then
     log "Installing Foundry Virtual Tabletop ${FOUNDRY_VERSION}"
-    unzip -q "${release_filename}" 'resources/*'
-    log_debug "Installation completed."
-  else
+
+    # Check the mime-type of the file
+    log_debug "Checking mime-type of release file."
+    mime_type=$(file --mime-type --brief "${release_filename}")
+    log_debug "Found mime-type: ${mime_type}"
+
+    # Check if the file is a zip archive
+    if [ "${mime_type}" = "application/zip" ]; then
+      log_debug "Extracting release file."
+      unzip -q "${release_filename}" 'resources/*'
+      log_debug "Installation completed."
+    else # The user provided the wrong file.
+      if [ "${mime_type}" = "application/vnd.microsoft.portable-executable" ]; then
+        log_error "The release file appears to be a Windows executable (.exe)."
+      elif [ "${mime_type}" = "application/zlib" ]; then
+        log_error "The release file appears to be a Mac disk image (.dmg)."
+      else
+        log_error "The release file does not contain the expected zip data."
+        log_error "Found: ${mime_type} instead of application/zip"
+      fi
+      log_error "Please provide the 'Linux/NodeJS' version of the release or URL."
+      log_warn "Deleting invalid release file from cache."
+      rm "${release_filename}"
+      exit 1
+    fi # mime_type is zip
+  else # release_filename does not exist
     log_error "Unable to install Foundry Virtual Tabletop!"
     log_error "Either set FOUNDRY_RELEASE_URL."
     log_error "Or set FOUNDRY_USERNAME and FOUNDRY_PASSWORD."
@@ -171,6 +206,37 @@ if [ $install_required = true ]; then
 
   if [[ "${CONTAINER_CACHE:-}" ]]; then
     log "Preserving release archive file in cache."
+    # Check if CONTAINER_CACHE_SIZE is set and if so, ensure it's greater than 0
+    if [[ -n "${CONTAINER_CACHE_SIZE:-}" ]]; then
+      if ! [[ "${CONTAINER_CACHE_SIZE}" -gt 0 ]] 2> /dev/null; then
+        log_error "If set, CONTAINER_CACHE_SIZE must be 1 or greater.  Found: ${CONTAINER_CACHE_SIZE}"
+        exit 1
+      fi
+
+      log "Cleaning up cache directory: ${CONTAINER_CACHE}"
+      log "Keeping ${CONTAINER_CACHE_SIZE} latest versions."
+      # Initialize counter
+      cache_files_removed_count=0
+
+      # Store the list of cache files to remove
+      file_list=$(find "${CONTAINER_CACHE}" -maxdepth 1 -name 'foundryvtt-*.zip' \
+        | sort -Vr \
+        | awk -v keep="${CONTAINER_CACHE_SIZE}" 'NR > keep')
+
+      # Iterate over the file list
+      if [ -n "$file_list" ]; then
+        for file in $file_list; do
+          log_warn "Removing: $file"
+          rm -f "$file"
+          cache_files_removed_count=$((cache_files_removed_count + 1))
+        done
+        log "Completed cache cleanup. Removed ${cache_files_removed_count} files."
+      else
+        log "No cache cleanup was necessary."
+      fi
+    else
+      log_debug "CONTAINER_CACHE_SIZE is not set. Skipping cache cleanup."
+    fi
   else
     log "Deleting release archive file."
     rm "${release_filename}"
@@ -214,18 +280,10 @@ if [ $install_required = true ]; then
   ./patch_lang.js
 fi # install required
 
-#tula
-ls -alRt /data
-# ensure the permissions are set correctly
-log "Setting data directory permissions."
-FOUNDRY_UID="${FOUNDRY_UID:-foundry}"
-FOUNDRY_GID="${FOUNDRY_GID:-foundry}"
-
 if [ ! -f "${LICENSE_FILE}" ]; then
   log "Installation not yet licensed."
   log_debug "Ensuring ${CONFIG_DIR} directory exists."
   mkdir -p "${CONFIG_DIR}"
-  chown -R "${FOUNDRY_UID}:${FOUNDRY_GID}" /data/Config
   set +o nounset # length check will fail
   if [[ ${#FOUNDRY_LICENSE_KEY} -ge ${license_min_length} ]]; then
     set -o nounset
@@ -257,6 +315,11 @@ else
   log "Not modifying existing installation license key."
 fi
 
+# ensure the permissions are set correctly
+log "Setting data directory permissions."
+FOUNDRY_UID="${FOUNDRY_UID:-foundry}"
+FOUNDRY_GID="${FOUNDRY_GID:-foundry}"
+log_debug "Setting ownership of /data to ${FOUNDRY_UID}:${FOUNDRY_GID}."
 # skip files matching CONTAINER_PRESERVE_OWNER or already belonging to the right user and group
 find /data \
   -regex "${CONTAINER_PRESERVE_OWNER:-}" -prune -or \
@@ -273,13 +336,26 @@ fi
 # drop privileges and handoff to launcher
 log "Starting launcher with uid:gid as ${FOUNDRY_UID}:${FOUNDRY_GID}."
 export CONTAINER_PRESERVE_CONFIG FOUNDRY_ADMIN_KEY FOUNDRY_AWS_CONFIG \
-  FOUNDRY_DEMO_CONFIG FOUNDRY_HOSTNAME FOUNDRY_IP_DISCOVERY FOUNDRY_LANGUAGE \
-  FOUNDRY_LOCAL_HOSTNAME FOUNDRY_MINIFY_STATIC_FILES FOUNDRY_PASSWORD_SALT \
-  FOUNDRY_PROTOCOL FOUNDRY_PROXY_PORT FOUNDRY_PROXY_SSL FOUNDRY_ROUTE_PREFIX \
-  FOUNDRY_SSL_CERT FOUNDRY_SSL_KEY FOUNDRY_UPNP FOUNDRY_UPNP_LEASE_DURATION \
-  FOUNDRY_WORLD
-su-exec "${FOUNDRY_UID}:${FOUNDRY_GID}" ./launcher.sh "$@" \
-  || log_error "Launcher exited with error code: $?"
+  FOUNDRY_COMPRESS_WEBSOCKET FOUNDRY_DEMO_CONFIG FOUNDRY_HOT_RELOAD FOUNDRY_HOSTNAME \
+  FOUNDRY_IP_DISCOVERY FOUNDRY_LANGUAGE FOUNDRY_LOCAL_HOSTNAME FOUNDRY_MINIFY_STATIC_FILES \
+  FOUNDRY_PASSWORD_SALT FOUNDRY_PROTOCOL FOUNDRY_PROXY_PORT FOUNDRY_PROXY_SSL \
+  FOUNDRY_ROUTE_PREFIX FOUNDRY_SSL_CERT FOUNDRY_SSL_KEY FOUNDRY_TELEMETRY FOUNDRY_UPNP \
+  FOUNDRY_UPNP_LEASE_DURATION FOUNDRY_WORLD
+# set the TERM signal handler
+trap handle_sigterm TERM
+su-exec "${FOUNDRY_UID}:${FOUNDRY_GID}" ./launcher.sh "$@" &
+child_pid=$!
+log_debug "Waiting for child pid: ${child_pid} to exit."
+wait "$child_pid"
+exit_code=$?
+# clear the TERM signal handler
+trap - TERM
+log_debug "Child process exited with code: ${exit_code}."
+
+# Check if the child exited with an error code
+if [ $exit_code -ne 0 ]; then
+  log_error "Child process failed with error code: $exit_code"
+fi
 
 # If the container requested a new S3 URL but disabled the cache
 # we are going to sleep forever to prevent a download loop.
@@ -288,7 +364,7 @@ if [[ "${requested_s3_url}" == "true" && "${CONTAINER_CACHE:-}" == "" ]]; then
   log_warn "This configuration could lead to a restart loop putting excessive load on the release server."
   log_warn "Please re-enable the CONTAINER_CACHE to allow the container to safely exit."
   log_warn "Sleeping..."
-  while true; do sleep 60; done
+  while true; do sleep 4; done
 fi
 
 exit 0

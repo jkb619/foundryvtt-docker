@@ -1,9 +1,8 @@
 ARG FOUNDRY_PASSWORD
 ARG FOUNDRY_RELEASE_URL
 ARG FOUNDRY_USERNAME
-#old version 10.291
-ARG FOUNDRY_VERSION=11.299
-ARG NODE_IMAGE_VERSION=16-alpine3.15
+ARG FOUNDRY_VERSION=11.315
+ARG NODE_IMAGE_VERSION=18-alpine3.18
 ARG VERSION
 
 FROM node:${NODE_IMAGE_VERSION} as compile-typescript-stage
@@ -56,7 +55,6 @@ ARG FOUNDRY_UID=421
 ARG FOUNDRY_VERSION
 ARG TARGETPLATFORM
 ARG VERSION
-ARG SSH_PUB_KEY
 
 LABEL com.foundryvtt.version=${FOUNDRY_VERSION}
 LABEL org.opencontainers.image.authors="markf+github@geekpad.com"
@@ -81,34 +79,23 @@ RUN addgroup --system --gid ${FOUNDRY_UID} foundry \
   && adduser --system --uid ${FOUNDRY_UID} --ingroup foundry foundry \
   && apk --update --no-cache add \
   curl \
+  file \
   jq \
   sed \
   su-exec \
   tzdata \
-  openssh \
   && npm install && echo ${VERSION} > image_version.txt
 
-#VOLUME ["/data"]
-RUN mkdir -p /data
-RUN chown -R ${FOUNDRY_UID}:${FOUNDRY_UID} /data
+VOLUME ["/data"]
 # HTTP Server
-EXPOSE 30000/TCP 22/TCP
+EXPOSE 30000/TCP
 # TURN Server
 # Not exposing TURN ports due to bug in Docker.
 # See: https://github.com/moby/moby/issues/11185
 # EXPOSE 33478/UDP
 # EXPOSE 49152-65535/UDP
 
-RUN mkdir -p /root/.ssh \
-    # only this user should be able to read this folder (it may contain private keys)
-    && chmod 0700 /root/.ssh \
-    # unlock the user
-    && passwd -u root
-
-RUN echo "${SSH_PUB_KEY}" > /root/.ssh/authorized_keys
-RUN echo -e "PasswordAuthentication no" >> /etc/ssh/sshd_config
-
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["resources/app/main.mjs", "--port=30000", "--headless", "--noupdate",\
-  "--dataPath=/data","--proxySSL=true"]
+  "--dataPath=/data"]
 HEALTHCHECK --start-period=3m --interval=30s --timeout=5s CMD ./check_health.sh

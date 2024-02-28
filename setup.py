@@ -67,19 +67,18 @@ setup(
     package_dir={"": "src"},
     py_modules=[splitext(basename(path))[0] for path in glob("src/*.py")],
     install_requires=[
-        "docker-compose == 1.29.2",
-        "semver == 2.13.0",
-        "setuptools == 65.5.0",
-        "wheel == 0.37.1",
+        "semver == 3.0.2",
+        "setuptools == 69.0.3",
+        "wheel == 0.42.0",
     ],
     extras_require={
         "test": [
             "coverage == 6.5.0",
             "coveralls == 3.3.1",
-            "docker == 6.0.1",
-            "pre-commit == 2.20.0",
-            "pytest == 7.2.0",
-            "pytest-cov == 4.0.0",
+            "docker == 7.0.0",
+            "pre-commit == 3.6.0",
+            "pytest == 7.4.4",
+            "pytest-cov == 4.1.0",
             "pytest-lazy-fixture == 0.6.3",
         ]
     },

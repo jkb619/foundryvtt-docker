@@ -70,7 +70,7 @@ async function fetchTokens() {
   const $ = await cheerio.load(body);
 
   const csrfmiddlewaretoken: string | string[] | undefined = $(
-    'input[name ="csrfmiddlewaretoken"]'
+    'input[name ="csrfmiddlewaretoken"]',
   ).val();
   if (typeof csrfmiddlewaretoken == "undefined") {
     logger.error("Could not find the CSRF middleware token.");
@@ -90,14 +90,13 @@ async function fetchTokens() {
 async function login(
   csrfmiddlewaretoken: string,
   username: string,
-  password: string
+  password: string,
 ) {
   const form_params = new URLSearchParams({
     csrfmiddlewaretoken: csrfmiddlewaretoken,
-    login_password: password,
-    login_redirect: "/",
-    login_username: username,
-    login: "",
+    next: "/",
+    password: password,
+    username: username,
   });
 
   logger.info(`Logging in as: ${username}`);
@@ -121,7 +120,7 @@ async function login(
   if (!session_cookie) {
     logger.error(`Unable to log in as ${username}, verify your credentials...`);
     throw new Error(
-      `Unable to log in as ${username}, verify your credentials...`
+      `Unable to log in as ${username}, verify your credentials...`,
     );
   }
 
@@ -176,16 +175,16 @@ async function main(): Promise<number> {
     const loggedInUsername = await login(
       csrfmiddlewaretoken,
       username,
-      password
+      password,
     );
 
     // Store the username in a cookie for use by other utilities
     const username_cookie = Cookie.parse(
-      `username=${loggedInUsername}; Domain=${LOCAL_DOMAIN}; Path=/`
+      `username=${loggedInUsername}; Domain=${LOCAL_DOMAIN}; Path=/`,
     );
     cookieJar.setCookieSync(
       username_cookie!.toString(),
-      `http://${LOCAL_DOMAIN}`
+      `http://${LOCAL_DOMAIN}`,
     );
   } catch (err: any) {
     logger.error(`Unable to authenticate: ${err.message}`);
